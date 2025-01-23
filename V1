@@ -1,0 +1,201 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <random>
+#include <chrono>
+#include <fstream>
+#include <unordered_set>
+#include <ctime>
+#include <cctype>
+#include <stdexcept>
+
+using namespace std;
+
+class JogoTorcido {
+private:
+    string palavraOriginal;
+    string palavraEmbaralhada;
+    vector<string> dicionario;
+    unordered_set<string> palavrasUsadas;
+
+    int pontuacao;
+    int tempoLimite;
+    string idiomaAtual;
+    int rodadasJogadas;
+
+    void carregarDicionario(const string& idioma) {
+        string nomeArquivo = (idioma == "PT") ? "portugues.txt" : "ingles.txt";
+        ifstream arquivo(nomeArquivo);
+
+        if (!arquivo.is_open()) {
+            throw runtime_error("Erro ao abrir dicionário: " + nomeArquivo);
+        }
+
+        dicionario.clear();
+        palavrasUsadas.clear();
+        string palavra;
+        while (getline(arquivo, palavra)) {
+            if (palavra.length() >= 3 && palavra.length() <= 10) {
+                // Converte para maiúsculas e adiciona ao dicionário
+                transform(palavra.begin(), palavra.end(), palavra.begin(), ::toupper);
+                dicionario.push_back(palavra);
+            }
+        }
+
+        if (dicionario.empty()) {
+            throw runtime_error("Dicionário vazio: " + nomeArquivo);
+        }
+    }
+
+    void selecionarPalavraAleatoria() {
+        // Verificar se todas as palavras já foram usadas
+        if (palavrasUsadas.size() == dicionario.size()) {
+            palavrasUsadas.clear(); // Reinicia o conjunto de palavras usadas
+        }
+
+        vector<string> palavrasDisponiveis;
+        for (const auto& palavra : dicionario) {
+            if (palavrasUsadas.find(palavra) == palavrasUsadas.end()) {
+                palavrasDisponiveis.push_back(palavra);
+            }
+        }
+
+        if (palavrasDisponiveis.empty()) {
+            throw runtime_error("Não há palavras disponíveis para seleção.");
+        }
+
+        // Seleciona uma palavra aleatória
+        random_device rd;
+        mt19937 gen(rd());
+        uniform_int_distribution<> dis(0, palavrasDisponiveis.size() - 1);
+        palavraOriginal = palavrasDisponiveis[dis(gen)];
+        palavrasUsadas.insert(palavraOriginal);
+    }
+
+    void embaralharPalavra() {
+        palavraEmbaralhada = palavraOriginal;
+
+        random_device rd;
+        mt19937 g(rd());
+
+        do {
+            shuffle(palavraEmbaralhada.begin(), palavraEmbaralhada.end(), g);
+        } while (palavraEmbaralhada == palavraOriginal);
+    }
+
+    void exibirStatus(time_t inicio) {
+        system("cls");
+        cout << "===== JOGO TORCIDO =====" << endl;
+        cout << "Rodada: " << rodadasJogadas << endl;
+        cout << "Palavra Embaralhada: " << palavraEmbaralhada << endl;
+        cout << "Pontuação: " << pontuacao << endl;
+        cout << "Tempo Restante: " << tempoLimite - difftime(time(nullptr), inicio) << " segundos" << endl;
+    }
+
+public:
+    JogoTorcido() : pontuacao(0), tempoLimite(60), rodadasJogadas(0) {}
+
+    void iniciarJogo(const string& idioma) {
+        idiomaAtual = idioma;
+        pontuacao = 0;
+        rodadasJogadas = 0;
+
+        try {
+            carregarDicionario(idioma);
+            jogarMultiplasRodadas();
+        } catch (const exception& e) {
+            cout << "Erro: " << e.what() << endl;
+            system("pause");
+        }
+    }
+
+    void jogarMultiplasRodadas() {
+        char continuarJogando = 'S';
+
+        while (continuarJogando == 'S') {
+            rodadasJogadas++;
+            selecionarPalavraAleatoria();
+            embaralharPalavra();
+
+            time_t inicio = time(nullptr);
+            bool palavraDescoberta = false;
+
+            while (difftime(time(nullptr), inicio) < tempoLimite && !palavraDescoberta) {
+                exibirStatus(inicio);
+
+                string tentativa;
+                cout << "\nDigite uma palavra (ou SAIR para encerrar): ";
+                cin >> tentativa;
+
+                transform(tentativa.begin(), tentativa.end(), tentativa.begin(), ::toupper);
+
+                if (tentativa == "SAIR") {
+                    continuarJogando = 'N';
+                    break;
+                }
+
+                if (tentativa == palavraOriginal) {
+                    pontuacao += 100;
+                    cout << "PARABÉNS! Você descobriu a palavra original!" << endl;
+                    palavraDescoberta = true;
+                    system("pause");
+                } else {
+                    cout << "Palavra incorreta!" << endl;
+                    system("pause");
+                }
+            }
+
+            if (!palavraDescoberta) {
+                cout << "Tempo esgotado! A palavra era: " << palavraOriginal << endl;
+                system("pause");
+            }
+
+            if (continuarJogando == 'S') {
+                cout << "Deseja continuar jogando? (S/N): ";
+                cin >> continuarJogando;
+                continuarJogando = toupper(continuarJogando);
+            }
+        }
+
+        finalizarJogo();
+    }
+
+    void finalizarJogo() {
+        system("cls");
+        cout << "\n===== FIM DE JOGO =====" << endl;
+        cout << "Total de Rodadas: " << rodadasJogadas << endl;
+        cout << "Pontuação Final: " << pontuacao << endl;
+        system("pause");
+    }
+
+    void menuPrincipal() {
+        while (true) {
+            system("cls");
+            cout << "===== JOGO TORCIDO =====" << endl;
+            cout << "1. Jogar em Português" << endl;
+            cout << "2. Jogar em Inglês" << endl;
+            cout << "3. Sair" << endl;
+            cout << "Escolha uma opção: ";
+
+            int opcao;
+            cin >> opcao;
+
+            switch (opcao) {
+                case 1: iniciarJogo("PT"); break;
+                case 2: iniciarJogo("EN"); break;
+                case 3: return;
+                default:
+                    cout << "Opção inválida!" << endl;
+                    system("pause");
+            }
+        }
+    }
+};
+
+int main() {
+    setlocale(LC_ALL, "Portuguese");
+    JogoTorcido jogo;
+    jogo.menuPrincipal();
+    return 0;
+}
