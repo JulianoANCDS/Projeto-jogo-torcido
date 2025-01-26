@@ -1,0 +1,512 @@
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <ctime>
+#include <locale>
+#include <windows.h>
+#include <conio.h>
+#include <vector>
+#include <algorithm>
+#include <fstream>
+#include <iomanip> // Para usar setw e left
+using namespace std;
+
+// Estrutura da fila usando apontadores
+struct Celula {
+    string nome;
+    int pontuacao;
+    Celula* prox;
+};
+
+struct Fila {
+    Celula* frente;
+    Celula* tras;
+};
+
+// Estrutura do jogador
+struct Jogador {
+    string nome;
+    int pontuacao;
+};
+
+// Estrutura do jogo
+struct JogoTorcido {
+    Fila palavrasEncontradas;
+    string palavraOriginal;
+    string palavraEmbaralhada;
+    int pontuacao;
+    int tempoLimite;
+};
+
+// Funções da fila
+void FFVazia(Fila* fila) {
+    fila->frente = new Celula();
+    fila->frente->prox = nullptr;
+    fila->tras = fila->frente;
+}
+
+bool FVazia(Fila* fila) {
+    return (fila->frente == fila->tras);
+}
+
+void Enfileirar(Fila* fila, string nome, int pontuacao) {
+    Celula* nova = new Celula();
+    nova->nome = nome;
+    nova->pontuacao = pontuacao;
+    nova->prox = nullptr;
+    fila->tras->prox = nova;
+    fila->tras = nova;
+}
+
+void Desenfileirar(Fila* fila, string& nome, int& pontuacao) {
+    if (FVazia(fila)) {
+        cout << "Fila vazia\n";
+        return;
+    }
+
+    Celula* aux = fila->frente->prox;
+    nome = aux->nome;
+    pontuacao = aux->pontuacao;
+    fila->frente->prox = aux->prox;
+
+    if (aux == fila->tras) {
+        fila->tras = fila->frente;
+    }
+
+    delete aux;
+}
+
+void LiberaFila(Fila* fila) {
+    Celula* aux;
+    while (fila->frente != fila->tras) {
+        aux = fila->frente->prox;
+        delete fila->frente;
+        fila->frente = aux;
+    }
+    delete fila->frente;
+}
+
+// Funções do jogo
+void inicializarJogo(JogoTorcido* jogo, bool resetarPontuacao = true) {
+    FFVazia(&jogo->palavrasEncontradas);
+    if (resetarPontuacao) {
+        jogo->pontuacao = 0; // Garante que a pontuação comece em zero
+    }
+    jogo->tempoLimite = 60;
+}
+
+void carregarDicionario(Fila* dicionario, const string& nomeArquivo) {
+    FILE* arquivo = fopen(nomeArquivo.c_str(), "r");
+    char palavra[50];
+
+    if (!arquivo) {
+        cout << "Erro ao abrir dicionário\n";
+        return;
+    }
+
+    FFVazia(dicionario);
+
+    while (fscanf(arquivo, "%s", palavra) == 1) {
+        string strPalavra(palavra);
+        if (strPalavra.length() >= 3 && strPalavra.length() <= 10) {
+            for (char& c : strPalavra) c = toupper(c);
+            Enfileirar(dicionario, strPalavra, 0);
+        }
+    }
+
+    fclose(arquivo);
+}
+
+void embaralharPalavra(const string& palavra, string& palavraEmbaralhada) {
+    palavraEmbaralhada = palavra;
+    srand(time(nullptr));
+    for (int i = palavraEmbaralhada.length() - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        swap(palavraEmbaralhada[i], palavraEmbaralhada[j]);
+    }
+}
+
+void limparTela() {
+    system("cls");
+}
+
+void setColor(int color) {
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color);
+}
+
+void resetColor() {
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7); // Volta para a cor padrão (cinza)
+}
+
+void exibirTelaAjuda() {
+    limparTela();
+    setColor(14); // Amarelo
+    cout << "===== AJUDA - JOGO TORCIDO =====" << endl;
+    resetColor();
+    cout << "Regras do Jogo:" << endl;
+    cout << "1. O jogo seleciona aleatoriamente uma palavra do dicionário." << endl;
+    cout << "2. As letras da palavra são embaralhadas." << endl;
+    cout << "3. Seu objetivo é descobrir a palavra original." << endl;
+    cout << endl;
+    cout << "Como Jogar:" << endl;
+    cout << "- Você tem 60 segundos para descobrir a palavra." << endl;
+    cout << "- Digite a palavra que acha ser a original." << endl;
+    cout << "- Cada palavra correta vale 100 pontos." << endl;
+    cout << "- Se errar, perderá 25 pontos (se tiver pontos suficientes)." << endl;
+    cout << "- Palavras devem ter entre 3 e 10 letras." << endl;
+    cout << endl;
+    setColor(10); // Verde claro
+    cout << "Pressione ENTER para voltar ao menu...";
+    resetColor();
+    cin.ignore();
+    cin.get();
+}
+
+void salvarJogadorArquivo(const string& nomeJogador, int pontuacao) {
+    ofstream arquivo("jogadores.txt", ios::app); // Abre o arquivo em modo de adição
+    if (!arquivo) {
+        cout << "Erro ao abrir o arquivo de jogadores.\n";
+        return;
+    }
+    arquivo << nomeJogador << " " << pontuacao << endl;
+    arquivo.close();
+}
+
+void carregarJogadores(Fila* jogadores) {
+    ifstream arquivo("jogadores.txt");
+    if (!arquivo) {
+        // Se o arquivo não existir, cria um novo
+        ofstream novoArquivo("jogadores.txt");
+        novoArquivo.close();
+        return;
+    }
+
+    FFVazia(jogadores);
+
+    string nomeJogador;
+    int pontuacao;
+
+    while (arquivo >> nomeJogador >> pontuacao) {
+        Enfileirar(jogadores, nomeJogador, pontuacao);
+    }
+
+    arquivo.close();
+}
+
+void ordenarJogadores(Fila* jogadores) {
+    if (FVazia(jogadores)) return;
+
+    vector<Jogador> temp;
+    string nome;
+    int pontuacao;
+
+    while (!FVazia(jogadores)) {
+        Desenfileirar(jogadores, nome, pontuacao);
+        temp.push_back({nome, pontuacao});
+    }
+
+    sort(temp.begin(), temp.end(), [](const Jogador& a, const Jogador& b) {
+        return a.pontuacao > b.pontuacao;
+    });
+
+    for (const auto& jogador : temp) {
+        Enfileirar(jogadores, jogador.nome, jogador.pontuacao);
+    }
+}
+
+void mostrarTop3(Fila* jogadores) {
+    if (FVazia(jogadores)) {
+        setColor(12); // Vermelho claro
+        cout << "Nenhum jogador cadastrado.\n";
+        resetColor();
+        return;
+    }
+
+    Fila temp;
+    FFVazia(&temp);
+
+    string nome;
+    int pontuacao;
+    int count = 0;
+
+    setColor(4); // Amarelo
+    cout << "===== TOP 3 JOGADORES =====" << endl;
+
+    while (!FVazia(jogadores) && count < 3) {
+        Desenfileirar(jogadores, nome, pontuacao);
+        setColor(10); // Verde claro
+        cout << (count + 1) << ". " << nome << " - Pontuação: ";
+        setColor(11); // Ciano claro
+        cout << pontuacao << endl;
+        Enfileirar(&temp, nome, pontuacao);
+        count++;
+    }
+
+    while (!FVazia(jogadores)) {
+        Desenfileirar(jogadores, nome, pontuacao);
+        Enfileirar(&temp, nome, pontuacao);
+    }
+
+    while (!FVazia(&temp)) {
+        Desenfileirar(&temp, nome, pontuacao);
+        Enfileirar(jogadores, nome, pontuacao);
+    }
+
+    resetColor();
+}
+
+void exibirBarraDeTempo(int tempoRestante, int tempoLimite) {
+    int progresso = (tempoRestante * 50) / tempoLimite; // 50 caracteres de largura
+    setColor(12); // Vermelho claro
+    cout << "[";
+    for (int i = 0; i < 50; i++) {
+        if (i < progresso) cout << "=";
+        else cout << " ";
+    }
+    cout << "] " << tempoRestante << "s" << endl;
+    resetColor();
+}
+
+void exibirPalavraEmbaralhada(const string& palavra) {
+    setColor(13); // Amarelo
+    cout << "Palavra Embaralhada: ";
+    setColor(12); // Vermelho claro
+    cout << palavra << endl;
+    resetColor();
+}
+
+void efeitoAcerto() {
+    setColor(10); // Verde
+    cout << "PARABÉNS! Você descobriu a palavra!" << endl;
+    Sleep(500);
+    resetColor();
+}
+
+void exibirControlePS2() {
+    setColor(13); // Amarelo
+
+    // Adiciona 5 linhas em branco antes de começar a desenhar o controle
+    for (int i = 0; i < 5; i++) {
+        cout << endl;
+    }
+    cout << setw(140) << "                                                           \n";
+    cout << setw(140) << "       _=====_                               _=====_      \n";
+    cout << setw(140) << "     / _____ \\                             / _____ \\     \n";
+    cout << setw(140) << "   +.-'_____'-.---------------------------.-'_____'-.+   \n";
+    cout << setw(140) << "  /   |     |  '.        S O N Y        .'  |  _  |   \\  \n";
+    cout << setw(140) << " / ___| /|\\ |___ \\                     / ___| /_\\ |___ \\ \n";
+    cout << setw(140) << "/ |      |      | ;  __           _   ; | _         _ | ;\n";
+    cout << setw(140) << "| | <---   ---> | | |__|         |_:> | ||_|       (_)| |\n";
+    cout << setw(140) << "| |___   |   ___| ;SELECT       START ; |___       ___| ;\n";
+    cout << setw(140) << "|\\    | \\|/ |    /  _     ___      _   \\    | (X) |    /|\n";
+    cout << setw(140) << "| \\   |_____|  .','\" \"', |___|  ,'\" \"', '.  |_____|  .' |\n";
+    cout << setw(140) << "|  '-.______.-' /       \\ANALOG/       \\  '-._____.-'   |\n";
+    cout << setw(140) << "|               |       |------|       |                |\n";
+    cout << setw(140) << "|              /\\       /      \\       /\\               |\n";
+    cout << setw(140) << "|             /  '.___.'        '.___.'  \\              |\n";
+    cout << setw(140) << "|            /                            \\             |\n";
+    cout << setw(140) << " \\          /                              \\           / \n";
+    cout << setw(140) << "  \\________/                                \\_________/  \n";
+    cout << setw(140) << "                    PS2 CONTROLLER                       \n";
+    resetColor();
+}
+
+int jogarJogoTorcido(JogoTorcido* jogo, const string& nomeJogador, const string& nomeArquivo) {
+    Fila dicionario;
+    string tentativa;
+    time_t inicioTempo, tempoAtual;
+
+    carregarDicionario(&dicionario, nomeArquivo);
+
+    Celula* palavraAtual = dicionario.frente->prox;
+    int total = 0;
+    while (palavraAtual != nullptr) {
+        total++;
+        palavraAtual = palavraAtual->prox;
+    }
+
+    int escolha = rand() % total;
+    palavraAtual = dicionario.frente->prox;
+    for (int i = 0; i < escolha; i++) {
+        palavraAtual = palavraAtual->prox;
+    }
+
+    jogo->palavraOriginal = palavraAtual->nome;
+    embaralharPalavra(jogo->palavraOriginal, jogo->palavraEmbaralhada);
+
+    time(&inicioTempo);
+    int tempoRestante;
+
+    do {
+        limparTela();
+        setColor(14); // Amarelo
+        cout << "===== JOGO TORCIDO =====" << endl;
+        resetColor();
+
+        // Exibe a mensagem de "Digite ESC caso queira sair"
+        setColor(11); // Ciano claro
+        cout << "Digite ESC caso queira sair" << endl;
+        resetColor();
+
+        exibirPalavraEmbaralhada(jogo->palavraEmbaralhada);
+
+        time(&tempoAtual);
+        tempoRestante = jogo->tempoLimite - difftime(tempoAtual, inicioTempo);
+
+        if (tempoRestante <= 0) {
+            setColor(12); // Vermelho claro
+            cout << "Tempo esgotado! A palavra era: ";
+            setColor(11); // Ciano claro
+            cout << jogo->palavraOriginal << endl;
+            resetColor();
+            cout << "Você perdeu!" << endl;
+            return 0;
+        }
+
+        exibirBarraDeTempo(tempoRestante, jogo->tempoLimite);
+
+        setColor(10); // Verde claro
+        cout << "Pontuação: " << jogo->pontuacao << endl;
+        resetColor();
+
+        cout << "Digite sua tentativa: ";
+
+        if (_kbhit()) {
+            cin >> tentativa;
+            for (char& c : tentativa) c = toupper(c);
+
+            if (tentativa == "ESC") {
+                // Pergunta se o usuário tem certeza que deseja sair
+                setColor(12); // Vermelho claro
+                cout << "Tem certeza que deseja parar de jogar? (S/N): ";
+                resetColor();
+
+                char confirmacao;
+                cin >> confirmacao;
+                confirmacao = toupper(confirmacao);
+
+                if (confirmacao == 'S') {
+                    salvarJogadorArquivo(nomeJogador, jogo->pontuacao);
+                    return 1; // Retorna ao menu principal
+                } else {
+                    continue; // Continua o jogo
+                }
+            }
+
+            if (tentativa == jogo->palavraOriginal) {
+                jogo->pontuacao += 100;
+                efeitoAcerto();
+                salvarJogadorArquivo(nomeJogador, jogo->pontuacao);
+
+                // Seleciona uma nova palavra do dicionário
+                escolha = rand() % total;
+                palavraAtual = dicionario.frente->prox;
+                for (int i = 0; i < escolha; i++) {
+                    palavraAtual = palavraAtual->prox;
+                }
+
+                jogo->palavraOriginal = palavraAtual->nome;
+                embaralharPalavra(jogo->palavraOriginal, jogo->palavraEmbaralhada);
+                time(&inicioTempo); // Reinicia o tempo
+            } else {
+                if (jogo->pontuacao >= 25) {
+                    jogo->pontuacao -= 25;
+                } else {
+                    jogo->pontuacao = 0;
+                }
+                setColor(12); // Vermelho claro
+                cout << "Você errou! Perdeu 25 pontos." << endl;
+                resetColor();
+                Sleep(1000);
+            }
+        }
+
+        // Exibe o controle PS2 no lado direito
+        exibirControlePS2();
+
+        Sleep(100); // Pausa para evitar uso excessivo da CPU
+    } while (tempoRestante > 0);
+
+    return 0;
+}
+
+int main() {
+    setlocale(LC_ALL, "portuguese");
+    int opcao;
+    string nomeJogador;
+    JogoTorcido jogo;
+    string nomeArquivo;
+
+    cout << "Bem-vindo ao Jogo Torcido!" << endl;
+    cout << "Informe seu nome: ";
+    getline(cin, nomeJogador);
+
+    // Inicializa o jogo com a pontuação zerada
+    inicializarJogo(&jogo, true);
+
+    do {
+        limparTela();
+        setColor(13); // Amarelo
+        cout << "===== MENU PRINCIPAL =====" << endl;
+        resetColor();
+        setColor(11); // Ciano claro
+        cout << "1. Jogar em Português" << endl;
+        cout << "2. Jogar em Inglês" << endl;
+        cout << "3. Ajuda" << endl;
+        cout << "4. Lista de Jogadores" << endl;
+        setColor(12); // Vermelho claro
+        cout << "0. Sair" << endl;
+        resetColor();
+        setColor(10); // Verde claro
+        cout << "Escolha uma opção: ";
+        resetColor();
+        cin >> opcao;
+        cin.ignore();
+
+        if (opcao == 1 || opcao == 2) {
+            nomeArquivo = (opcao == 1) ? "portugues.txt" : "ingles.txt";
+            int resultado = jogarJogoTorcido(&jogo, nomeJogador, nomeArquivo);
+
+            if (resultado == 1) {
+                setColor(10); // Verde claro
+                cout << "Você saiu do jogo! Pontuação: " << jogo.pontuacao << endl;
+                resetColor();
+            } else {
+                setColor(12); // Vermelho claro
+                cout << "Você perdeu! Pontuação: " << jogo.pontuacao << endl;
+                resetColor();
+            }
+
+            // Carregar e ordenar jogadores
+            Fila jogadores;
+            carregarJogadores(&jogadores);
+            ordenarJogadores(&jogadores);
+
+            // Mostrar top 3
+            mostrarTop3(&jogadores);
+
+            cout << "Pressione ENTER para voltar ao menu...";
+            cin.ignore();
+            cin.get();
+        } else if (opcao == 3) {
+            exibirTelaAjuda();
+        } else if (opcao == 4) {
+            Fila jogadores;
+            carregarJogadores(&jogadores);
+            ordenarJogadores(&jogadores);
+            mostrarTop3(&jogadores);
+
+            cout << "Pressione ENTER para voltar ao menu...";
+            cin.ignore();
+            cin.get();
+        } else if (opcao == 0) {
+            cout << "Obrigado por jogar!" << endl;
+            return 0;
+        } else {
+            cout << "Opção inválida!" << endl;
+            Sleep(1000);
+        }
+    } while (true);
+
+    return 0;
+}
