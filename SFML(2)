@@ -1,0 +1,626 @@
+#include <SFML/Graphics.hpp>
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <ctime>
+#include <fstream>
+#include <sstream>
+
+// Estrutura da fila usando apontadores
+struct Celula {
+    std::string palavra;
+    int pontuacao;
+    Celula* prox;
+};
+
+struct Fila {
+    Celula* frente;
+    Celula* tras;
+};
+
+// Funções da fila
+void FFVazia(Fila* fila) {
+    fila->frente = new Celula;
+    fila->frente->prox = nullptr;
+    fila->tras = fila->frente;
+}
+
+bool FVazia(Fila* fila) {
+    return (fila->frente == fila->tras);
+}
+
+void Enfileirar(Fila* fila, const std::string& palavra, int pontuacao) {
+    Celula* nova = new Celula;
+    nova->palavra = palavra;
+    nova->pontuacao = pontuacao;
+    nova->prox = nullptr;
+    fila->tras->prox = nova;
+    fila->tras = nova;
+}
+
+void Desenfileirar(Fila* fila, std::string& palavra, int& pontuacao) {
+    if (FVazia(fila)) {
+        std::cout << "Fila vazia\n";
+        return;
+    }
+
+    Celula* aux = fila->frente->prox;
+    palavra = aux->palavra;
+    pontuacao = aux->pontuacao;
+    fila->frente->prox = aux->prox;
+
+    if (aux == fila->tras) {
+        fila->tras = fila->frente;
+    }
+
+    delete aux;
+}
+
+void LiberaFila(Fila* fila) {
+    Celula* aux;
+    while (fila->frente != fila->tras) {
+        aux = fila->frente->prox;
+        delete fila->frente;
+        fila->frente = aux;
+    }
+    delete fila->frente;
+}
+
+class Botao {
+private:
+    sf::RectangleShape forma;
+    sf::Text texto;
+    std::string textoBotao;
+    bool estaSobreposto;
+
+public:
+    Botao(float x, float y, float largura, float altura, const std::string& texto, const sf::Font& fonte) {
+        forma.setPosition(x, y);
+        forma.setSize(sf::Vector2f(largura, altura));
+        forma.setFillColor(sf::Color(100, 100, 100));
+        forma.setOutlineThickness(2);
+        forma.setOutlineColor(sf::Color::White);
+
+        this->texto.setFont(fonte);
+        this->texto.setString(texto);
+        this->texto.setCharacterSize(24);
+        this->texto.setFillColor(sf::Color::White);
+        this->textoBotao = texto;
+
+        // Centralizar texto
+        this->texto.setPosition(
+            x + (largura - this->texto.getGlobalBounds().width) / 2.0f,
+            y + (altura - this->texto.getGlobalBounds().height) / 2.0f
+        );
+
+        estaSobreposto = false;
+    }
+
+    void setSobreposto(bool sobreposto) {
+        estaSobreposto = sobreposto;
+        if (sobreposto) {
+            forma.setFillColor(sf::Color(150, 150, 150));
+        } else {
+            forma.setFillColor(sf::Color(100, 100, 100));
+        }
+    }
+
+    bool contem(sf::Vector2f ponto) const {
+        return forma.getGlobalBounds().contains(ponto);
+    }
+
+    void desenhar(sf::RenderWindow& janela) {
+        janela.draw(forma);
+        janela.draw(texto);
+    }
+
+    const std::string& getTexto() const { return textoBotao; }
+};
+
+class Jogador {
+public:
+    std::string nome;
+    int pontuacao;
+
+    Jogador(const std::string& n = "", int p = 0) : nome(n), pontuacao(p) {}
+};
+
+class JogoTorcido {
+private:
+    sf::RenderWindow janela;
+    sf::Font fonte;
+    std::vector<Botao> botoesMenu;
+    Fila dicionario;
+    std::string palavraAtual;
+    std::string palavraEmbaralhada;
+    std::string entradaJogador;
+    int pontuacao;
+    float tempoRestante;
+    Jogador jogadorAtual;
+    Fila placar; // Fila para armazenar os jogadores
+    sf::Clock temporizadorFeedback;
+    std::string mensagemFeedback;
+    bool mostrarFeedback;
+
+    // Texturas e sprites para as imagens
+    sf::Texture texturaTopo;
+    sf::Sprite spriteTopo;
+    sf::Texture texturaFundo;
+    sf::Sprite spriteFundo;
+
+    enum EstadoJogo {
+        MENU,
+        JOGANDO,
+        AJUDA,
+        PLACAR,
+        FIM_DE_JOGO
+    } estadoAtual;
+
+    sf::Text textoEntrada;
+    sf::Text textoPontuacao;
+    sf::Text textoTempo;
+    sf::Text textoPalavraEmbaralhada;
+    sf::Text textoEsc;
+    sf::Text textoFeedback;
+    sf::RectangleShape barraTempo;
+
+    void carregarDicionario(const std::string& arquivo) {
+        std::ifstream arquivoEntrada(arquivo);
+        std::string palavra;
+
+        FFVazia(&dicionario);
+
+        while (arquivoEntrada >> palavra) {
+            if (palavra.length() >= 3 && palavra.length() <= 10) {
+                std::transform(palavra.begin(), palavra.end(), palavra.begin(), ::toupper);
+                Enfileirar(&dicionario, palavra, 0); // Pontuação não é usada no dicionário
+            }
+        }
+    }
+
+    void embaralharPalavra() {
+        if (FVazia(&dicionario)) return;
+
+        // Contar palavras na fila
+        Celula* temp = dicionario.frente->prox;
+        int total = 0;
+        while (temp != nullptr) {
+            total++;
+            temp = temp->prox;
+        }
+
+        // Escolher palavra aleatória
+        int escolha = rand() % total;
+        temp = dicionario.frente->prox;
+        for (int i = 0; i < escolha; i++) {
+            temp = temp->prox;
+        }
+
+        palavraAtual = temp->palavra;
+        palavraEmbaralhada = palavraAtual;
+        do {
+            std::random_shuffle(palavraEmbaralhada.begin(), palavraEmbaralhada.end());
+        } while (palavraEmbaralhada == palavraAtual);
+    }
+
+    void salvarPontuacao() {
+        std::ofstream arquivo("jogadores.txt", std::ios::app);
+        arquivo << jogadorAtual.nome << " " << pontuacao << std::endl;
+    }
+
+    void carregarPlacar() {
+        // Limpar a fila antes de carregar novos dados
+        while (!FVazia(&placar)) {
+            std::string temp;
+            int pontuacaoTemp;
+            Desenfileirar(&placar, temp, pontuacaoTemp);
+        }
+
+        std::ifstream arquivo("jogadores.txt");
+        std::string nome;
+        int pontuacao;
+        while (arquivo >> nome >> pontuacao) {
+            Enfileirar(&placar, nome, pontuacao);
+        }
+
+        // Ordenar o placar (usando uma fila temporária)
+        Fila filaTemp;
+        FFVazia(&filaTemp);
+
+        while (!FVazia(&placar)) {
+            std::string nomeTemp;
+            int pontuacaoTemp;
+            Desenfileirar(&placar, nomeTemp, pontuacaoTemp);
+
+            Celula* temp = filaTemp.frente->prox;
+            Celula* anterior = filaTemp.frente;
+
+            while (temp != nullptr && temp->pontuacao > pontuacaoTemp) {
+                anterior = temp;
+                temp = temp->prox;
+            }
+
+            Celula* nova = new Celula;
+            nova->palavra = nomeTemp;
+            nova->pontuacao = pontuacaoTemp;
+            nova->prox = temp;
+            anterior->prox = nova;
+
+            if (temp == nullptr) {
+                filaTemp.tras = nova;
+            }
+        }
+
+        placar = filaTemp;
+    }
+
+    void mostrarMensagemFeedback(const std::string& mensagem, const sf::Color& cor) {
+        mensagemFeedback = mensagem;
+        textoFeedback.setFillColor(cor);
+        mostrarFeedback = true;
+        temporizadorFeedback.restart();
+    }
+
+public:
+    JogoTorcido() : janela(sf::VideoMode::getDesktopMode(), "Jogo Torcido", sf::Style::Fullscreen),
+                    pontuacao(0), tempoRestante(60.f), estadoAtual(MENU), mostrarFeedback(false) {
+        if (!fonte.loadFromFile("C:/arial.ttf")) {
+            std::cout << "Erro ao carregar fonte\n";
+            return;
+        }
+
+        // Carregar texturas
+        if (!texturaTopo.loadFromFile("topo.png")) {
+            std::cout << "Erro ao carregar imagem do topo\n";
+        }
+        spriteTopo.setTexture(texturaTopo);
+        spriteTopo.setPosition((janela.getSize().x - texturaTopo.getSize().x) / 2, 50); // Centralizado no topo
+
+        if (!texturaFundo.loadFromFile("fundo.png")) {
+            std::cout << "Erro ao carregar imagem do fundo\n";
+        }
+        spriteFundo.setTexture(texturaFundo);
+        spriteFundo.setPosition(0, janela.getSize().y - texturaFundo.getSize().y); // No fundo da tela
+
+        // Inicializar botões do menu
+        botoesMenu.push_back(Botao(300, 300, 200, 50, "Portugues", fonte));
+        botoesMenu.push_back(Botao(300, 370, 200, 50, "Ingles", fonte));
+        botoesMenu.push_back(Botao(300, 440, 200, 50, "Ajuda", fonte));
+        botoesMenu.push_back(Botao(300, 510, 200, 50, "Placar", fonte));
+        botoesMenu.push_back(Botao(300, 580, 200, 50, "Sair", fonte));
+
+        // Inicializar elementos de texto do jogo
+        textoEntrada.setFont(fonte);
+        textoEntrada.setCharacterSize(24);
+        textoEntrada.setFillColor(sf::Color::White);
+        textoEntrada.setPosition(300, 300);
+
+        textoPontuacao.setFont(fonte);
+        textoPontuacao.setCharacterSize(24);
+        textoPontuacao.setFillColor(sf::Color::White);
+        textoPontuacao.setPosition(10, 10);
+
+        textoTempo.setFont(fonte);
+        textoTempo.setCharacterSize(24);
+        textoTempo.setFillColor(sf::Color::White);
+        textoTempo.setPosition(10, 40);
+
+        textoPalavraEmbaralhada.setFont(fonte);
+        textoPalavraEmbaralhada.setCharacterSize(32);
+        textoPalavraEmbaralhada.setFillColor(sf::Color::Yellow);
+        textoPalavraEmbaralhada.setPosition(300, 200);
+
+        textoEsc.setFont(fonte);
+        textoEsc.setCharacterSize(20);
+        textoEsc.setFillColor(sf::Color::White);
+        textoEsc.setString("Pressione ESC para voltar ao menu");
+        textoEsc.setPosition(10, janela.getSize().y - 50);
+
+        textoFeedback.setFont(fonte);
+        textoFeedback.setCharacterSize(24);
+        textoFeedback.setPosition(300, 400);
+
+        barraTempo.setSize(sf::Vector2f(700, 20));
+        barraTempo.setPosition(50, 70);
+        barraTempo.setFillColor(sf::Color::Green);
+
+        FFVazia(&dicionario);
+        FFVazia(&placar); // Inicializa a fila do placar
+        srand(time(nullptr));
+    }
+
+    ~JogoTorcido() {
+        LiberaFila(&dicionario);
+        LiberaFila(&placar); // Libera a fila do placar
+    }
+
+    void executar() {
+        std::cout << "Digite seu nome: ";
+        std::getline(std::cin, jogadorAtual.nome);
+
+        sf::Clock relogio;
+        while (janela.isOpen()) {
+            float dt = relogio.restart().asSeconds();
+
+            sf::Event evento;
+            while (janela.pollEvent(evento)) {
+                tratarEvento(evento);
+            }
+
+            atualizar(dt);
+            renderizar();
+        }
+    }
+
+private:
+    void tratarEvento(const sf::Event& evento) {
+        if (evento.type == sf::Event::Closed) {
+            janela.close();
+        }
+
+        if (evento.type == sf::Event::MouseMoved) {
+            sf::Vector2f posicaoMouse(evento.mouseMove.x, evento.mouseMove.y);
+            for (auto& botao : botoesMenu) {
+                botao.setSobreposto(botao.contem(posicaoMouse));
+            }
+        }
+
+        if (evento.type == sf::Event::MouseButtonPressed) {
+            if (evento.mouseButton.button == sf::Mouse::Left) {
+                tratarCliqueMouse(sf::Vector2f(evento.mouseButton.x, evento.mouseButton.y));
+            }
+        }
+
+        if (estadoAtual == JOGANDO && evento.type == sf::Event::TextEntered) {
+            tratarEntradaTexto(evento);
+        }
+
+        if (evento.type == sf::Event::KeyPressed) {
+            if (evento.key.code == sf::Keyboard::Escape) {
+                if (estadoAtual == JOGANDO) {
+                    estadoAtual = MENU;
+                    salvarPontuacao();
+                } else if (estadoAtual == AJUDA || estadoAtual == PLACAR || estadoAtual == FIM_DE_JOGO) {
+                    estadoAtual = MENU;
+                }
+            }
+        }
+    }
+
+    void tratarCliqueMouse(sf::Vector2f posicaoMouse) {
+        if (estadoAtual == MENU) {
+            for (size_t i = 0; i < botoesMenu.size(); i++) {
+                if (botoesMenu[i].contem(posicaoMouse)) {
+                    tratarSelecaoMenu(i);
+                }
+            }
+        }
+    }
+
+    void tratarSelecaoMenu(int indice) {
+        switch (indice) {
+            case 0: // Português
+                iniciarJogo("portugues.txt");
+                break;
+            case 1: // Inglês
+                iniciarJogo("ingles.txt");
+                break;
+            case 2: // Ajuda
+                estadoAtual = AJUDA;
+                break;
+            case 3: // Placar
+                carregarPlacar();
+                estadoAtual = PLACAR;
+                break;
+            case 4: // Sair
+                janela.close();
+                break;
+        }
+    }
+
+    void tratarEntradaTexto(const sf::Event& evento) {
+        if (evento.text.unicode < 128) {
+            if (evento.text.unicode == '\b' && !entradaJogador.empty()) {
+                entradaJogador.pop_back();
+            }
+            else if (evento.text.unicode == '\r' || evento.text.unicode == '\n') {
+                verificarPalavra();
+            }
+            else if (std::isalpha(evento.text.unicode)) {
+                entradaJogador += static_cast<char>(std::toupper(evento.text.unicode));
+            }
+        }
+    }
+
+    void iniciarJogo(const std::string& arquivoDicionario) {
+        LiberaFila(&dicionario);
+        carregarDicionario(arquivoDicionario);
+        estadoAtual = JOGANDO;
+        pontuacao = 0;
+        tempoRestante = 60.f;
+        entradaJogador.clear();
+        mostrarFeedback = false;
+        embaralharPalavra();
+    }
+
+    void verificarPalavra() {
+        if (entradaJogador == palavraAtual) {
+            pontuacao += 100;
+            mostrarMensagemFeedback("CORRETO! +100 pontos", sf::Color::Green);
+            embaralharPalavra();
+            tempoRestante = 60.f;
+        } else {
+            if (pontuacao >= 25) {
+                pontuacao -= 25;
+                mostrarMensagemFeedback("ERRADO! -25 pontos", sf::Color::Red);
+            } else {
+                mostrarMensagemFeedback("ERRADO!", sf::Color::Red);
+            }
+        }
+        entradaJogador.clear();
+    }
+
+    void atualizar(float dt) {
+        if (estadoAtual == JOGANDO) {
+            tempoRestante -= dt;
+            if (tempoRestante <= 0) {
+                estadoAtual = FIM_DE_JOGO;
+                salvarPontuacao();
+                carregarPlacar();
+            }
+
+            float larguraBarraTempo = (tempoRestante / 60.f) * 700.f;
+            barraTempo.setSize(sf::Vector2f(larguraBarraTempo, 20));
+
+            if (mostrarFeedback && temporizadorFeedback.getElapsedTime().asSeconds() > 2.0f) {
+                mostrarFeedback = false;
+            }
+        }
+    }
+
+    void renderizar() {
+        janela.clear(sf::Color(50, 50, 50));
+
+        // Desenhar imagem do topo no menu
+        if (estadoAtual == MENU) {
+            janela.draw(spriteTopo);
+        }
+
+        // Desenhar imagem do fundo durante o jogo
+        if (estadoAtual == JOGANDO) {
+            janela.draw(spriteFundo);
+        }
+
+        switch (estadoAtual) {
+            case MENU:
+                renderizarMenu();
+                break;
+            case JOGANDO:
+                renderizarJogo();
+                break;
+            case AJUDA:
+                renderizarAjuda();
+                break;
+            case PLACAR:
+                renderizarPlacar();
+                break;
+            case FIM_DE_JOGO:
+                renderizarFimDeJogo();
+                break;
+        }
+
+        janela.display();
+    }
+
+    void renderizarMenu() {
+        for (auto& botao : botoesMenu) {
+            botao.desenhar(janela);
+        }
+    }
+
+    void renderizarJogo() {
+        janela.draw(barraTempo);
+
+        textoPontuacao.setString("Pontuacao: " + std::to_string(pontuacao));
+        janela.draw(textoPontuacao);
+
+        textoTempo.setString("Tempo: " + std::to_string(static_cast<int>(tempoRestante)));
+        janela.draw(textoTempo);
+
+        textoPalavraEmbaralhada.setString(palavraEmbaralhada);
+        janela.draw(textoPalavraEmbaralhada);
+
+        textoEntrada.setString(entradaJogador);
+        janela.draw(textoEntrada);
+
+        janela.draw(textoEsc);
+        if (mostrarFeedback) {
+            textoFeedback.setString(mensagemFeedback);
+            janela.draw(textoFeedback);
+        }
+    }
+
+    void renderizarAjuda() {
+        sf::Text textoAjuda;
+        textoAjuda.setFont(fonte);
+        textoAjuda.setCharacterSize(24);
+        textoAjuda.setFillColor(sf::Color::White);
+        textoAjuda.setPosition(50, 50);
+
+        std::string ajudaString =
+            "Como Jogar:\n\n"
+            "1. Digite a palavra correta baseada nas letras embaralhadas\n"
+            "2. Acerte para ganhar 100 pontos\n"
+            "3. Erro custa 25 pontos\n"
+            "4. Voce tem 60 segundos para cada palavra\n"
+            "5. O jogo termina quando o tempo acabar\n\n"
+            "Pressione ESC para voltar ao menu";
+
+        textoAjuda.setString(ajudaString);
+        janela.draw(textoAjuda);
+    }
+
+    void renderizarPlacar() {
+        sf::Text titulo;
+        titulo.setFont(fonte);
+        titulo.setString("Melhores Pontuacoes");
+        titulo.setCharacterSize(32);
+        titulo.setFillColor(sf::Color::Yellow);
+        titulo.setPosition(250, 50);
+        janela.draw(titulo);
+
+        float yPos = 150;
+        Celula* temp = placar.frente->prox;
+        int rank = 1;
+        while (temp != nullptr) {
+            sf::Text entrada;
+            entrada.setFont(fonte);
+            entrada.setCharacterSize(24);
+            entrada.setFillColor(sf::Color::White);
+            entrada.setPosition(250, yPos);
+
+            std::stringstream ss;
+            ss << rank << ". " << temp->palavra << ": " << temp->pontuacao;
+            entrada.setString(ss.str());
+
+            janela.draw(entrada);
+            yPos += 40;
+            temp = temp->prox;
+            rank++;
+        }
+
+        janela.draw(textoEsc);
+    }
+
+    void renderizarFimDeJogo() {
+        sf::Text textoFimDeJogo;
+        textoFimDeJogo.setFont(fonte);
+        textoFimDeJogo.setCharacterSize(48);
+        textoFimDeJogo.setFillColor(sf::Color::Red);
+        textoFimDeJogo.setString("Fim de Jogo!");
+        textoFimDeJogo.setPosition(
+            (janela.getSize().x - textoFimDeJogo.getGlobalBounds().width) / 2,
+            200
+        );
+
+        sf::Text pontuacaoFinal;
+        pontuacaoFinal.setFont(fonte);
+        pontuacaoFinal.setCharacterSize(32);
+        pontuacaoFinal.setFillColor(sf::Color::White);
+        pontuacaoFinal.setString("Pontuacao Final: " + std::to_string(pontuacao));
+        pontuacaoFinal.setPosition(
+            (janela.getSize().x - pontuacaoFinal.getGlobalBounds().width) / 2,
+            300
+        );
+
+        janela.draw(textoFimDeJogo);
+        janela.draw(pontuacaoFinal);
+        janela.draw(textoEsc);
+    }
+};
+
+int main() {
+    JogoTorcido jogo;
+    jogo.executar();
+    return 0;
+}
